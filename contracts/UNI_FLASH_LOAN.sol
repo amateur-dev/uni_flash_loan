@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-pragma solidity=0.7.6;
+pragma solidity =0.7.6;
 pragma abicoder v2;
 
+import "hardhat/console.sol";
 import '@uniswap/v3-core/contracts/interfaces/callback/IUniswapV3FlashCallback.sol';
 import '@uniswap/v3-core/contracts/libraries/LowGasSafeMath.sol';
 
@@ -26,6 +27,61 @@ contract PairFlash is IUniswapV3FlashCallback, PeripheryImmutableState, Peripher
         address _WETH9
     ) PeripheryImmutableState(_factory, _WETH9) {
         swapRouter = _swapRouter;
+    }
+
+    //fee1 is the fee of the pool from the initial borrow
+    //fee2 is the fee of the first pool to arb from
+    //fee3 is the fee of the second pool to arb from
+    struct FlashParams {
+        address token0;
+        address token1;
+        uint24 fee1;
+        uint256 amount0;
+        uint256 amount1;
+        uint24 fee2;
+        uint24 fee3;
+    }
+    // fee2 and fee3 are the two other fees associated with the two other pools of token0 and token1
+    struct FlashCallbackData {
+        uint256 amount0;
+        uint256 amount1;
+        address payer;
+        PoolAddress.PoolKey poolKey;
+        uint24 poolFee2;
+        uint24 poolFee3;
+    }
+
+    /// @param params The parameters necessary for flash and the callback, passed in as FlashParams
+    /// @notice Calls the pools flash function with data needed in `uniswapV3FlashCallback`
+    function initFlash(FlashParams memory params) external {
+        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
+            token0: params.token0,
+            token1: params.token1,
+            fee: params.fee1
+        });
+        console.log(PoolKey);
+        IUniswapV3Pool pool = IUniswapV3Pool(PoolAddress.computeAddress(factory, poolKey));
+        console.log(pool);
+        // recipient of borrowed amounts
+        // amount of token0 requested to borrow
+        // amount of token1 requested to borrow
+        // need amount 0 and amount1 in callback to pay back pool
+        // recipient of flash should be THIS contract
+        pool.flash(
+            address(this),
+            params.amount0,
+            params.amount1,
+            abi.encode(
+                FlashCallbackData({
+                    amount0: params.amount0,
+                    amount1: params.amount1,
+                    payer: msg.sender,
+                    poolKey: poolKey,
+                    poolFee2: params.fee2,
+                    poolFee3: params.fee3
+                })
+            )
+        );
     }
 
     /// @param fee0 The fee from calling flash for token0
@@ -102,58 +158,5 @@ contract PairFlash is IUniswapV3FlashCallback, PeripheryImmutableState, Peripher
             TransferHelper.safeApprove(token0, address(this), profit1);
             pay(token1, address(this), decoded.payer, profit1);
         }
-    }
-
-    //fee1 is the fee of the pool from the initial borrow
-    //fee2 is the fee of the first pool to arb from
-    //fee3 is the fee of the second pool to arb from
-    struct FlashParams {
-        address token0;
-        address token1;
-        uint24 fee1;
-        uint256 amount0;
-        uint256 amount1;
-        uint24 fee2;
-        uint24 fee3;
-    }
-    // fee2 and fee3 are the two other fees associated with the two other pools of token0 and token1
-    struct FlashCallbackData {
-        uint256 amount0;
-        uint256 amount1;
-        address payer;
-        PoolAddress.PoolKey poolKey;
-        uint24 poolFee2;
-        uint24 poolFee3;
-    }
-
-    /// @param params The parameters necessary for flash and the callback, passed in as FlashParams
-    /// @notice Calls the pools flash function with data needed in `uniswapV3FlashCallback`
-    function initFlash(FlashParams memory params) external {
-        PoolAddress.PoolKey memory poolKey = PoolAddress.PoolKey({
-            token0: params.token0,
-            token1: params.token1,
-            fee: params.fee1
-        });
-        IUniswapV3Pool pool = IUniswapV3Pool(PoolAddress.computeAddress(factory, poolKey));
-        // recipient of borrowed amounts
-        // amount of token0 requested to borrow
-        // amount of token1 requested to borrow
-        // need amount 0 and amount1 in callback to pay back pool
-        // recipient of flash should be THIS contract
-        pool.flash(
-            address(this),
-            params.amount0,
-            params.amount1,
-            abi.encode(
-                FlashCallbackData({
-                    amount0: params.amount0,
-                    amount1: params.amount1,
-                    payer: msg.sender,
-                    poolKey: poolKey,
-                    poolFee2: params.fee2,
-                    poolFee3: params.fee3
-                })
-            )
-        );
     }
 }
